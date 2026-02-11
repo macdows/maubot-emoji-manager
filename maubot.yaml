@@ -1,6 +1,6 @@
 maubot: 0.1.0
-id: app.cliquers.emojimgr
-version: 1.0.1
+id: app.cliquers.emojimanager
+version: 1.0.8
 license: MIT
 modules:
 - emoji_manager

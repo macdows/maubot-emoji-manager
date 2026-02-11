@@ -3,7 +3,16 @@ from maubot.handlers import command
 from mautrix.types import EventType
 
 
-EMOTES_TYPE = EventType("im.ponies.room_emotes")
+EMOTES_TYPE = EventType("im.ponies.room_emotes", EventType.Class.STATE)
+
+
+def get_emoticons(content) -> dict:
+    try:
+        if hasattr(content, "serialize"):
+            content = content.serialize()
+        return content.get("emoticons", {}) or {}
+    except (KeyError, TypeError, AttributeError):
+        return {}
 
 
 class EmojiManager(Plugin):
@@ -21,7 +30,7 @@ class EmojiManager(Plugin):
                 current = await self.client.get_state_event(
                     evt.room_id, EMOTES_TYPE, ""
                 )
-                emoticons = current.get("emoticons", {})
+                emoticons = get_emoticons(current)
             except Exception:
                 emoticons = {}
 
@@ -44,17 +53,18 @@ class EmojiManager(Plugin):
             current = await self.client.get_state_event(
                 evt.room_id, EMOTES_TYPE, ""
             )
-            emoticons = current.get("emoticons", {})
+            emoticons = get_emoticons(current)
 
             if not emoticons:
                 await evt.reply("No custom emojis in this room")
                 return
 
             emoji_list = "\n".join(
-                [f":{name}: - {data['url']}" for name, data in emoticons.items()]
+                f":{name}: - {data['url']}" for name, data in emoticons.items()
             )
             await evt.reply(f"Custom emojis:\n{emoji_list}")
-        except Exception:
+        except Exception as e:
+            self.log.error(f"Failed to list emojis: {e}")
             await evt.reply("No custom emojis in this room")
 
     @command.new(
@@ -66,7 +76,7 @@ class EmojiManager(Plugin):
             current = await self.client.get_state_event(
                 evt.room_id, EMOTES_TYPE, ""
             )
-            emoticons = current.get("emoticons", {})
+            emoticons = get_emoticons(current)
 
             if name not in emoticons:
                 await evt.reply(f"Emoji :{name}: not found")
