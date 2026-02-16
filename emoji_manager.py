@@ -1,8 +1,10 @@
 import re
+from typing import Type
 
 from maubot import Plugin, MessageEvent
 from maubot.handlers import command
 from mautrix.types import EventType
+from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
 
 EMOTES_TYPE = EventType("im.ponies.room_emotes", EventType.Class.STATE)
@@ -41,7 +43,19 @@ def build_pack_content(images: dict, pack_meta: dict) -> dict:
     return content
 
 
+class Config(BaseProxyConfig):
+    def do_update(self, helper: ConfigUpdateHelper) -> None:
+        helper.copy("presets")
+
+
 class EmojiManager(Plugin):
+
+    async def start(self) -> None:
+        self.config.load_and_update()
+
+    @classmethod
+    def get_config_class(cls) -> Type[BaseProxyConfig]:
+        return Config
 
     async def _read_pack(self, room_id) -> tuple[dict, dict]:
         try:
@@ -51,7 +65,7 @@ class EmojiManager(Plugin):
             content = {}
         return get_images(content), get_pack_meta(content)
 
-    @command.new("emoji", help="Manage custom emojis. Subcommands: add, remove, list")
+    @command.new("emoji", help="Manage custom emojis. Subcommands: add, remove, list, preset")
     async def emoji(self, evt: MessageEvent) -> None:
         pass
 
@@ -120,3 +134,57 @@ class EmojiManager(Plugin):
         except Exception as e:
             self.log.error(f"Failed to list emojis: {e}")
             await evt.reply("No custom emojis in this room")
+
+    @emoji.subcommand("preset", help="Apply emoji preset — !emoji preset [name]")
+    @command.argument("name", required=False)
+    async def preset(self, evt: MessageEvent, name: str) -> None:
+        presets = self.config["presets"] or {}
+
+        if not name:
+            if not presets:
+                await evt.reply("No presets configured.")
+                return
+            names = ", ".join(sorted(presets.keys()))
+            await evt.reply(f"Available presets: {names}")
+            return
+
+        if name not in presets:
+            await evt.reply(f"Unknown preset `{name}`.")
+            return
+
+        preset_data = presets[name]
+        if not isinstance(preset_data, dict) or "images" not in preset_data:
+            await evt.reply(f"Preset `{name}` is misconfigured (missing `images`).")
+            return
+
+        raw_images = preset_data["images"]
+        images = {}
+        warnings = []
+        for shortcode, entry in raw_images.items():
+            valid, reason = validate_shortcode(shortcode)
+            if not valid:
+                warnings.append(f"Skipped `{shortcode}`: {reason}")
+                continue
+            if not isinstance(entry, dict) or not entry.get("url", "").startswith("mxc://"):
+                warnings.append(f"Skipped `{shortcode}`: invalid or missing mxc:// URL")
+                continue
+            images[shortcode] = {"url": entry["url"]}
+
+        if not images:
+            await evt.reply(f"Preset `{name}` has no valid emojis.")
+            return
+
+        pack_meta = preset_data.get("pack") or {}
+        try:
+            await self.client.send_state_event(
+                evt.room_id,
+                EMOTES_TYPE,
+                build_pack_content(images, pack_meta),
+                state_key="",
+            )
+            msg = f"Applied preset `{name}` ({len(images)} emojis)."
+            if warnings:
+                msg += "\nWarnings:\n" + "\n".join(warnings)
+            await evt.reply(msg)
+        except Exception as e:
+            await evt.reply(f"Error applying preset: {e}")
