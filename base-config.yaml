@@ -1,1 +1,4 @@
 presets: {}
+rooms: []
+allowed_users: []
+delay: 0.5
